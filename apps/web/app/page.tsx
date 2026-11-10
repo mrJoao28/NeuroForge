@@ -1,14 +1,12 @@
 "use client";
 import { useState } from "react";
+import { createDataset, datasetOptions, type DatasetId } from "../lib/datasets";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from "recharts";
 
 type Point = { epoch: number; train: number; validation: number | null };
 type TrainingResponse = { kind: "real-training"; model: { input: number; hidden: number; output: number }; history: Point[] };
-const samples = Array.from({ length: 20 }, (_, i) => {
-  const x = i / 19;
-  return { x: [x], y: [2 * x + 1] };
-});
 export default function Home() {
+  const [datasetId, setDatasetId] = useState<DatasetId>("linear");
   const [epochs, setEpochs] = useState(120);
   const [rate, setRate] = useState(0.03);
   const [width, setWidth] = useState(8);
@@ -20,9 +18,10 @@ export default function Home() {
   async function runTraining() {
     setTraining(true); setError(""); setResult(null);
     try {
+      const dataset = createDataset(datasetId);
       const response = await fetch("/api/train", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ x: samples.map(s => s.x), y: samples.map(s => s.y),
+        body: JSON.stringify({ x: dataset.x, y: dataset.y,
           hidden_width: width, epochs, learning_rate: rate, seed: 42 }),
       });
       const data: unknown = await response.json();
@@ -45,9 +44,9 @@ export default function Home() {
   }
   return <><header className="top"><div className="logo">◈ NEUROFORGE</div><span className="muted">Neural Network Laboratory · Live engine</span></header><main>
     <p className="tag">Experiment workspace / 02</p><h1>Train a real neural network.</h1>
-    <p className="muted subtitle">Run the NumPy engine on a small linear regression dataset (y = 2x + 1). Metrics are returned by the Python training API. Nothing is simulated.</p>
+    <p className="muted subtitle">Run the NumPy engine on a selectable deterministic regression dataset. Metrics are returned by the Python training API. Nothing is simulated.</p>
     <section className="grid"><div className="card"><h3>Epochs completed</h3><div className="metric">{history.length || "—"}</div></div><div className="card"><h3>Final training MSE</h3><div className="metric">{final ? final.train.toFixed(5) : "—"}</div></div><div className="card"><h3>Hidden neurons</h3><div className="metric">{result?.model.hidden ?? width}</div></div></section>
-    <section className="card"><h3>Training configuration · NumPy</h3><div className="controls">
+    <section className="card"><h3>Training configuration · NumPy</h3><div className="controls"><label>Dataset <select aria-label="Dataset" value={datasetId} disabled={training} onChange={e => { setDatasetId(e.target.value as DatasetId); setResult(null); }} style={{background:"#0a1324",color:"white",padding:8,borderRadius:8,border:"1px solid #40516b"}}>{datasetOptions.map(option => <option key={option.id} value={option.id}>{option.name} ({option.description})</option>)}</select></label>
       <label>Epochs <input aria-label="Epochs" type="number" min={10} max={500} value={epochs} disabled={training} onChange={e=>setEpochs(Math.max(10,Math.min(500,Number(e.target.value)||10)))}/></label>
       <label>Learning rate <input aria-label="Learning rate" type="number" min={0.001} max={0.1} step={0.005} value={rate} disabled={training} onChange={e=>setRate(Math.max(0.001,Math.min(0.1,Number(e.target.value)||0.001)))}/></label>
       <label>Neurons <input aria-label="Neurons" type="number" min={1} max={32} value={width} disabled={training} onChange={e=>setWidth(Math.max(1,Math.min(32,Number(e.target.value)||1)))}/></label>
