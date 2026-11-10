@@ -5,13 +5,15 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   const baseUrl = process.env.NEUROFORGE_API_URL;
   if (!baseUrl) return NextResponse.json({ error: "Training API is not configured. Set NEUROFORGE_API_URL." }, { status: 503 });
+  const apiKey = process.env.NEUROFORGE_API_KEY;
+  if (!apiKey) return NextResponse.json({ error: "Training credentials are not configured." }, { status: 503 });
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 }); }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 25000);
   try {
     const upstream = await fetch(new URL("/v1/train", baseUrl), {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json", "X-Neuroforge-Api-Key": apiKey },
       body: JSON.stringify(body), signal: controller.signal, cache: "no-store",
     });
     const payload = await upstream.json();
