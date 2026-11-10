@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { createDataset, datasetOptions, type DatasetId } from "../lib/datasets";
+import { appendExperiment, finalLoss, rankExperiments, type Experiment } from "../lib/experiments";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from "recharts";
 
 type Point = { epoch: number; train: number; validation: number | null };
@@ -13,6 +14,8 @@ export default function Home() {
   const [training, setTraining] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<TrainingResponse | null>(null);
+  const [runs, setRuns] = useState<Experiment[]>([]);
+  const [nextId, setNextId] = useState(1);
   const history = result?.history ?? [];
   const final = history.at(-1);
   async function runTraining() {
@@ -32,7 +35,10 @@ export default function Home() {
       }
       if (!data || typeof data !== "object" || !("kind" in data) || data.kind !== "real-training" ||
           !("history" in data) || !Array.isArray(data.history)) throw new Error("Unexpected training response.");
-      setResult(data as TrainingResponse);
+      const trained = data as TrainingResponse;
+      setResult(trained);
+      setRuns(previous => appendExperiment(previous, { id: nextId, dataset: datasetId, epochs, rate, width, history: trained.history }));
+      setNextId(previous => previous + 1);
     } catch (e) { setError(e instanceof Error ? e.message : "Unknown error"); }
     finally { setTraining(false); }
   }
@@ -54,5 +60,6 @@ export default function Home() {
       <button className="btn" disabled={!result || training} onClick={exportData}>Export JSON</button>
     </div>{error && <p role="alert" style={{color:"#ff9a9a"}}>{error}</p>}</section>
     <section className="card" style={{marginTop:16}}><h3>Real training loss over epochs</h3><div className="chart">{history.length ? <ResponsiveContainer width="100%" height="100%"><LineChart data={history}><CartesianGrid stroke="#25354b" strokeDasharray="3 3"/><XAxis dataKey="epoch" stroke="#93a5bf"/><YAxis stroke="#93a5bf"/><Tooltip contentStyle={{background:"#142039",border:"1px solid #40516b"}}/><Legend/><Line type="monotone" dataKey="train" name="Training MSE" stroke="#54b6ff" dot={false} strokeWidth={2}/></LineChart></ResponsiveContainer> : <p className="muted">Run a training experiment to display the loss curve.</p>}</div></section>
+    <section className="card" style={{marginTop:16}}><h3>Experiment comparison · Current session</h3><p className="muted">Up to 8 recent runs. Ranked by final training MSE; compare only runs on the same dataset for a fair comparison. Results are not persisted after page reload.</p>{runs.length ? <><div style={{overflowX:"auto"}}><table style={{width:"100%",textAlign:"left",borderCollapse:"collapse"}}><thead><tr><th>Run</th><th>Dataset</th><th>Epochs</th><th>Rate</th><th>Neurons</th><th>Final MSE</th></tr></thead><tbody>{rankExperiments(runs).map(run => <tr key={run.id}><td>#{run.id}</td><td>{run.dataset}</td><td>{run.epochs}</td><td>{run.rate}</td><td>{run.width}</td><td>{finalLoss(run).toFixed(6)}</td></tr>)}</tbody></table></div><button className="btn" style={{marginTop:12}} onClick={() => setRuns([])}>Clear comparison</button></> : <p className="muted">Train multiple experiments to compare results.</p>}</section>
   </main></>;
 }
