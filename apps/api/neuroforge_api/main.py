@@ -3,12 +3,15 @@ from __future__ import annotations
 from math import isfinite
 import os
 import secrets
-from fastapi import Header
+from fastapi import Header, Request
+from .rate_limit import RateLimiter
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, model_validator
 import numpy as np
 from neuroforge_core import MLP
 from neuroforge_core.experiments import train_experiment
+
+limiter = RateLimiter(limit=10, window_seconds=60)
 
 app = FastAPI(title="NeuroForge API", version="0.1.0")
 
@@ -46,12 +49,17 @@ def health():
     return {"status": "ok"}
 
 @app.post("/v1/train")
-def train(request: TrainRequest, x_neuroforge_api_key: str | None = Header(default=None)):
+def train(request: TrainRequest, http_request: Request, x_neuroforge_api_key: str | None = Header(default=None)):
     expected = os.getenv("NEUROFORGE_API_KEY")
     if not expected:
         raise HTTPException(status_code=503, detail="Training API key is not configured")
     if not x_neuroforge_api_key or not secrets.compare_digest(x_neuroforge_api_key, expected):
         raise HTTPException(status_code=401, detail="Invalid API key")
+    # Count only authorized calls; use the connection peer rather than untrusted forwarded headers.
+    peer = http_request.client.host if http_request.client else "unknown"
+    allowed, retry_after = limiter.allow(peer)
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Training rate limit exceeded", headers={"Retry-After": str(retry_after)})
     x = np.asarray(request.x, dtype=float)
     y = np.asarray(request.y, dtype=float)
     model = MLP([x.shape[1], request.hidden_width, y.shape[1]], seed=request.seed)
