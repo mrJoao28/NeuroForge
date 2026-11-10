@@ -1,5 +1,10 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { ComparisonChart } from "../components/ComparisonChart";
+import { ExperimentInsights } from "../components/ExperimentInsights";
+import { comparableRuns } from "../lib/comparison";
+import { downloadText, exportExperimentsCsv } from "../lib/export";
+import { clearExperiments, loadExperiments, saveExperiments } from "../lib/storage";
 import { createDataset, datasetOptions, type DatasetId } from "../lib/datasets";
 import { appendExperiment, finalLoss, rankExperiments, type Experiment } from "../lib/experiments";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from "recharts";
@@ -16,6 +21,16 @@ export default function Home() {
   const [result, setResult] = useState<TrainingResponse | null>(null);
   const [runs, setRuns] = useState<Experiment[]>([]);
   const [nextId, setNextId] = useState(1);
+  const [storageReady, setStorageReady] = useState(false);
+  const [comparisonDataset, setComparisonDataset] = useState<DatasetId>("linear");
+  const filteredRuns = comparableRuns(runs, comparisonDataset);
+  useEffect(() => {
+    const restored = loadExperiments(window.localStorage);
+    setRuns(restored);
+    setNextId(Math.max(0, ...restored.map(run => run.id)) + 1);
+    setStorageReady(true);
+  }, []);
+  useEffect(() => { if (storageReady) saveExperiments(window.localStorage, runs); }, [runs, storageReady]);
   const history = result?.history ?? [];
   const final = history.at(-1);
   async function runTraining() {
@@ -60,6 +75,6 @@ export default function Home() {
       <button className="btn" disabled={!result || training} onClick={exportData}>Export JSON</button>
     </div>{error && <p role="alert" style={{color:"#ff9a9a"}}>{error}</p>}</section>
     <section className="card" style={{marginTop:16}}><h3>Real training loss over epochs</h3><div className="chart">{history.length ? <ResponsiveContainer width="100%" height="100%"><LineChart data={history}><CartesianGrid stroke="#25354b" strokeDasharray="3 3"/><XAxis dataKey="epoch" stroke="#93a5bf"/><YAxis stroke="#93a5bf"/><Tooltip contentStyle={{background:"#142039",border:"1px solid #40516b"}}/><Legend/><Line type="monotone" dataKey="train" name="Training MSE" stroke="#54b6ff" dot={false} strokeWidth={2}/></LineChart></ResponsiveContainer> : <p className="muted">Run a training experiment to display the loss curve.</p>}</div></section>
-    <section className="card" style={{marginTop:16}}><h3>Experiment comparison · Current session</h3><p className="muted">Up to 8 recent runs. Ranked by final training MSE; compare only runs on the same dataset for a fair comparison. Results are not persisted after page reload.</p>{runs.length ? <><div style={{overflowX:"auto"}}><table style={{width:"100%",textAlign:"left",borderCollapse:"collapse"}}><thead><tr><th>Run</th><th>Dataset</th><th>Epochs</th><th>Rate</th><th>Neurons</th><th>Final MSE</th></tr></thead><tbody>{rankExperiments(runs).map(run => <tr key={run.id}><td>#{run.id}</td><td>{run.dataset}</td><td>{run.epochs}</td><td>{run.rate}</td><td>{run.width}</td><td>{finalLoss(run).toFixed(6)}</td></tr>)}</tbody></table></div><button className="btn" style={{marginTop:12}} onClick={() => setRuns([])}>Clear comparison</button></> : <p className="muted">Train multiple experiments to compare results.</p>}</section>
+    <section className="card" style={{marginTop:16}}><h3>Experiment comparison · Current session</h3><p className="muted">The last 8 runs are stored in this browser only. Select a dataset to compare matching experiments fairly.</p><div className="controls"><label>Compare dataset <select aria-label="Compare dataset" value={comparisonDataset} onChange={e => setComparisonDataset(e.target.value as DatasetId)}>{datasetOptions.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}</select></label><button className="btn" disabled={!runs.length} onClick={() => downloadText("neuroforge-experiments.csv",exportExperimentsCsv(runs),"text/csv;charset=utf-8")}>Export all CSV</button></div><ExperimentInsights runs={filteredRuns}/><ComparisonChart runs={filteredRuns}/>{filteredRuns.length ? <><div style={{overflowX:"auto"}}><table style={{width:"100%",textAlign:"left",borderCollapse:"collapse"}}><thead><tr><th>Run</th><th>Dataset</th><th>Epochs</th><th>Rate</th><th>Neurons</th><th>Final MSE</th></tr></thead><tbody>{rankExperiments(filteredRuns).map(run => <tr key={run.id}><td>#{run.id}</td><td>{run.dataset}</td><td>{run.epochs}</td><td>{run.rate}</td><td>{run.width}</td><td>{finalLoss(run).toFixed(6)}</td></tr>)}</tbody></table></div><button className="btn" style={{marginTop:12}} onClick={() => { setRuns([]); clearExperiments(window.localStorage); }}>Clear all history</button></> : <p className="muted">No runs for this dataset yet.</p>}</section>
   </main></>;
 }
