@@ -5,6 +5,7 @@ import os
 import secrets
 from fastapi import Header, Request
 from .rate_limit import RateLimiter
+from .splits import split_dataset
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, model_validator
 import numpy as np
@@ -22,6 +23,7 @@ class TrainRequest(BaseModel):
     epochs: int = Field(default=100, ge=1, le=1000)
     learning_rate: float = Field(default=0.01, gt=0, le=0.5)
     seed: int = Field(default=42, ge=0, le=2**32 - 1)
+    validation_fraction: float = Field(default=0.2, ge=0, le=0.5)
     @model_validator(mode="after")
     def enforce_compute_budget(self):
         # Conservative budget for a shared CPU instance; prevents oversized experiments.
@@ -63,11 +65,16 @@ def train(request: TrainRequest, http_request: Request, x_neuroforge_api_key: st
     x = np.asarray(request.x, dtype=float)
     y = np.asarray(request.y, dtype=float)
     model = MLP([x.shape[1], request.hidden_width, y.shape[1]], seed=request.seed)
+    training, validation = split_dataset(x, y, request.validation_fraction, request.seed)
     try:
-        history = train_experiment(model, x, y, epochs=request.epochs,
-                                   learning_rate=request.learning_rate, seed=request.seed)
+        history = train_experiment(model, *training, epochs=request.epochs,
+                                   learning_rate=request.learning_rate, validation=validation, seed=request.seed)
     except (ValueError, FloatingPointError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"kind": "real-training", "model": {"input": x.shape[1], "hidden": request.hidden_width,
+    predictions = model.forward(x)
+    if not np.isfinite(predictions).all():
+        raise HTTPException(status_code=422, detail="Training diverged; try a smaller learning rate")
+    return {"kind": "real-training", "validation_fraction": request.validation_fraction,
+            "predictions": [{"x": float(x[i, 0]), "actual": float(y[i, 0]), "predicted": float(predictions[i, 0])} for i in range(len(x))] if x.shape[1] == 1 and y.shape[1] == 1 else [], "model": {"input": x.shape[1], "hidden": request.hidden_width,
             "output": y.shape[1]}, "history": [{"epoch": item.epoch, "train": item.train_mse,
             "validation": item.validation_mse} for item in history]}
